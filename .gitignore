@@ -8,6 +8,11 @@ __pycache__/
 mlruns/
 mlartifacts/
 
+.env
+.adk
+.venv
+__pycache__/
+.vscode/
 
 # Ignore specific file types
 *.pkl
