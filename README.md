@@ -309,7 +309,430 @@ chmod 600 ~/.ssh/id_ed25519
 ssh -T git@github.com
 ```
 
+# Learning Objectives
+
+## What You'll Learn
+
+In this section, you'll learn:
+
+- **How to create parent and sub-agent relationships**
+- **How to write data to the session state from a tool**
+- **How to read from the state using key templating** (e.g., `{my_key?}`)
+- **How to use a SequentialAgent for step-by-step workflows**
+- **How to use a LoopAgent to create iterative refinement cycles**
+- **How to use a ParallelAgent to run independent tasks concurrently**
+
+## 2. Multi-Agent Systems
+
+In ADK, you organize agents in a **tree structure**. This hierarchy is key to controlling the conversation's flow, as it limits which agent can "pass" the conversation to which other agent. This makes the system's behavior more predictable and easier to debug.
+
+### Benefits include:
+
+- **Intuitive Design**: The structure is inspired by real-world teams, making it easier to reason about.
+- **Controlled Flow**: The hierarchy gives you precise control over task delegation, which helps in debugging. For example, the tree structure ensures the correct report-writing agent is called, even if you have two with similar descriptions.
+
+---
+
+## Setup Instructions
+
+### Clone the Repository
+
+```bash
+git clone --depth 1 https://github.com/GoogleCloudPlatform/devrel-demos.git devrel-demos-multiagent-lab
+mv devrel-demos-multiagent-lab/ai-ml/build-multiagent-systems-with-adk/adk_multiagent_systems ~
+cd ~/adk_multiagent_systems
+```
+
+### Open Cloud Editor
+
+The explorer panel on the left will refresh. You should now see your complete project structure, with the `parent_and_subagents` and `workflow_agents` sub-directories, ready for the next steps.
+
+### Activate Virtual Environment
+
+```bash
+uv venv
+source .venv/bin/activate
+```
+
+### Install Dependencies
+
+```bash
+uv pip install -r requirements.txt
+```
+
+### Set Up Environment Variables
+
+Get your active project ID:
+
+```bash
+gcloud projects list
+gcloud config get-value project
+```
+
+Edit the environment file:
+
+```bash
+cloudshell edit .env
+```
+
+Paste the following into the `.env` file:
+
+```bash
+GOOGLE_GENAI_USE_VERTEXAI=TRUE
+GOOGLE_CLOUD_PROJECT="[YOUR-PROJECT-ID]"
+GOOGLE_CLOUD_LOCATION=global
+MODEL="gemini-2.5-flash"
+```
+
+Copy `.env` to sub-agent directories:
+
+```bash
+cp .env parent_and_subagents/.env
+cp .env workflow_agents/.env
+```
+
+> **Note**: You can see hidden files in Cloud Editor by toggling the "View Hidden Files" option.
+
+---
+
+## 7. Explore Transfers Between Parent, Sub-Agent, and Peer Agents
+
+The conversation always starts with the `root_agent`. By default, a parent agent uses its sub-agents' description to decide when to transfer the conversation. You can also guide these transfers explicitly in the parent's instruction by using the sub-agents' name.
+
+**Make `travel_brainstormer` and `attractions_planner` sub-agents** of the `root_agent` by adding the following line to the creation of the `root_agent`:
+
+```python
+sub_agents=[travel_brainstormer, attractions_planner]
+```
+
+**In the terminal, chat with your agent:**
+
+```bash
+cd ~/adk_multiagent_systems
+adk run parent_and_subagents
+```
+
+At the `[user]:` prompt in the terminal, type:
+```
+hello
+```
+
+**Now let's be more explicit.** In `agent.py`, add the following to the `root_agent`'s instruction:
+
+```python
+"If they need help deciding, send them to 'travel_brainstormer'."
+"If they know what country they'd like to visit, send them to the 'attractions_planner'."
+```
+
+**Again run:**
+
+```bash
+adk run parent_and_subagents
+```
+
+At the user prompt, type `exit` to end the session.
+
+---
+
+## 8. Use Session State to Store and Retrieve Information
+
+Every ADK conversation has a **Session**, which includes a session state dictionary. This state is accessible to all agents, making it the perfect way to pass information between them or maintain data (like a list) throughout the conversation.
+
+**Return to the file `adk_multiagent_systems/parent_and_subagents/agent.py`**
+
+Paste the following function definition after the `# Tools` header:
+
+```python
+def save_attractions_to_state(
+    tool_context: ToolContext,
+    attractions: List[str]
+) -> dict[str, str]:
+    """Saves the list of attractions to state["attractions"].
+
+    Args:
+        attractions [str]: a list of strings to add to the list of attractions
+
+    Returns:
+        None
+    """
+    # Load existing attractions from state. If none exist, start an empty list
+    existing_attractions = tool_context.state.get("attractions", [])
+
+    # Update the 'attractions' key with a combo of old and new lists.
+    # When the tool is run, ADK will create an event and make
+    # corresponding updates in the session's state.
+    tool_context.state["attractions"] = existing_attractions + attractions
+
+    # A best practice for tools is to return a status message in a return dict
+    return {"status": "success"}
+```
+
+**Add the tool to the `attractions_planner` agent** by adding the `tools` parameter:
+
+```python
+tools=[save_attractions_to_state]
+```
+
+**Add the following bullet points** to the `attractions_planner` agent's existing instruction:
+
+```python
+"- When they reply, use your tool to save their selected attraction and then provide more possible attractions."
+"- If they ask to view the list, provide a bulleted list of { attractions? }"
+```
+
+**Launch the Agent Development Kit Web UI:**
+
+```bash
+adk web
+```
+
+**Test again:**
+1. From the **Select an agent** dropdown on the left, choose `parent_and_subagents`
+2. Start the conversation with: `hello`
+
+---
+
+## 9. Workflow Agents
+
+This is perfect for automated, multi-step tasks like a "Plan and Execute" or "Draft and Revise" pipeline. ADK provides three built-in workflow agents to manage this:
+
+1. **SequentialAgent**
+2. **LoopAgent**
+3. **ParallelAgent**
+
+---
+
+## 10. Build a Multi-Agent System with a SequentialAgent
+
+**Workflow:**
+1. A `root_agent` (greeter) will welcome the user and get the movie subject.
+2. It will then transfer to a `SequentialAgent` named `film_concept_team`, which will:
+   - Run a `researcher` agent to get facts from Wikipedia.
+   - Run a `screenwriter` agent to use those facts to write a plot.
+   - Run a `file_writer` agent to save the final plot to a file.
+
+**In the Cloud Shell Editor, open `adk_multiagent_systems/workflow_agents/agent.py`**
+
+Notice the `append_to_state` tool. This helper function lets agents append data to a list in the session state, which is how the researcher and screenwriter will pass their work.
+
+**Try out the agent:**
+
+```bash
+cd ~/adk_multiagent_systems
+adk web --reload_agents
+```
+
+---
+
+## 11. Add a LoopAgent for Iterative Work
+
+The `LoopAgent` is a workflow agent that runs its sub-agents in a sequence and then repeats, starting from the beginning. This "loop" continues until a condition is met, like reaching a `max_iterations` count or a sub-agent calling the built-in `exit_loop` tool.
+
+**To make these changes:**
+
+1. **Add the import for `exit_loop`** (near the other google.adk imports):
+
+```python
+from google.adk.tools import exit_loop
+```
+
+2. **Add the new `critic` agent.** This agent will review the plot. If it's good, it calls `exit_loop`. If not, it adds feedback to the state for the next loop.
+
+Paste the following agent definition under the `# Agents` section:
+
+```python
+critic = Agent(
+    name="critic",
+    model=model_name,
+    description="Reviews the outline so that it can be improved.",
+    instruction="""
+    INSTRUCTIONS:
+    Consider these questions about the PLOT_OUTLINE:
+    - Does it meet a satisfying three-act cinematic structure?
+    - Do the characters' struggles seem engaging?
+    - Does it feel grounded in a real time period in history?
+    - Does it sufficiently incorporate historical details from the RESEARCH?
+
+    If the PLOT_OUTLINE does a good job with these questions, exit the writing loop with your 'exit_loop' tool.
+    If significant improvements can be made, use the 'append_to_state' tool to add your feedback to the field 'CRITICAL_FEEDBACK'.
+    Explain your decision and briefly summarize the feedback you have provided.
+
+    PLOT_OUTLINE:
+    { PLOT_OUTLINE? }
+
+    RESEARCH:
+    { research? }
+    """,
+    before_model_callback=log_query_to_model,
+    after_model_callback=log_model_response,
+    tools=[append_to_state, exit_loop]
+)
+```
+
+3. **Create the `writers_room` LoopAgent.** This will contain the three agents that will work in the loop.
+
+Paste the following code above the `film_concept_team` agent definition:
+
+```python
+writers_room = LoopAgent(
+    name="writers_room",
+    description="Iterates through research and writing to improve a movie plot outline.",
+    sub_agents=[
+        researcher,
+        screenwriter,
+        critic
+    ],
+    max_iterations=5,
+)
+```
+
+4. **Update the `film_concept_team` SequentialAgent** to use the new `writers_room` loop. Replace the `researcher` and `screenwriter` with the single `writers_room` agent.
+
+Replace your existing `film_concept_team` definition with this:
+
+```python
+film_concept_team = SequentialAgent(
+    name="film_concept_team",
+    description="Write a film plot outline and save it as a text file.",
+    sub_agents=[
+        writers_room,
+        file_writer
+    ],
+)
+```
+
+5. **Test the updated agent:**
+   - Return to the ADK Dev UI tab and click **+ New Session** in the upper right
+   - Begin a new conversation with: `hello`
+   - When prompted, give the agent a broader topic this time
+   - When the loop completes, the agent will write the file
+   - Review the generated file in the `adk_multiagent_systems/movie_pitches` directory
+   - Inspect the event graph in the Dev UI to see the loop structure
+
+---
+
+## 12. Use a ParallelAgent for "Fan Out and Gather"
+
+The `ParallelAgent` is a workflow agent that executes all its sub-agents at the same time (concurrently). This is valuable for tasks that can be divided into independent sub-tasks, like running two different research jobs.
+
+**You will use a ParallelAgent to create a "preproduction team"** that works in parallel. One agent will research box office potential while another agent simultaneously brainstorms casting ideas. This is often called a **"fan out and gather" pattern**: the ParallelAgent "fans out" the work, and a later agent (our file_writer) "gathers" the results.
+
+**Your final agent flow will be:**
+1. The `greeter` (root) starts the chat
+2. It transfers to the `film_concept_team` (SequentialAgent), which runs:
+   - The `writers_room` (LoopAgent) to create the plot
+   - The new `preproduction_team` (ParallelAgent) to research box office and casting at the same time
+   - The `file_writer` to gather all the results and save the file
+
+**In `adk_multiagent_systems/workflow_agents/agent.py`, paste the new ParallelAgent and its sub-agents** under the `# Agents` header:
+
+```python
+box_office_researcher = Agent(
+    name="box_office_researcher",
+    model=model_name,
+    description="Considers the box office potential of this film",
+    instruction="""
+    PLOT_OUTLINE:
+    { PLOT_OUTLINE? }
+
+    INSTRUCTIONS:
+    Write a report on the box office potential of a movie like that described in PLOT_OUTLINE based on the reported box office performance of other recent films.
+    """,
+    output_key="box_office_report"
+)
+
+casting_agent = Agent(
+    name="casting_agent",
+    model=model_name,
+    description="Generates casting ideas for this film",
+    instruction="""
+    PLOT_OUTLINE:
+    { PLOT_OUTLINE? }
+
+    INSTRUCTIONS:
+    Generate ideas for casting for the characters described in PLOT_OUTLINE
+    by suggesting actors who have received positive feedback from critics and/or
+    fans when they have played similar roles.
+    """,
+    output_key="casting_report"
+)
+
+preproduction_team = ParallelAgent(
+    name="preproduction_team",
+    sub_agents=[
+        box_office_researcher,
+        casting_agent
+    ]
+)
+```
+
+**Update the `film_concept_team` SequentialAgent's `sub_agents` list** to include the new `preproduction_team` (between `writers_room` and `file_writer`):
+
+Replace your existing `film_concept_team` definition with this:
+
+```python
+film_concept_team = SequentialAgent(
+    name="film_concept_team",
+    description="Write a film plot outline and save it as a text file.",
+    sub_agents=[
+        writers_room,
+        preproduction_team,
+        file_writer
+    ],
+)
+```
+
+**Update the `file_writer` agent's instruction** so it "gathers" the new reports from the state and adds them to the file:
+
+Replace the instruction string for the `file_writer` with this:
+
+```python
+instruction="""
+INSTRUCTIONS:
+- Create a marketable, contemporary movie title suggestion for the movie described in the PLOT_OUTLINE.
+If a title has been suggested in PLOT_OUTLINE, you can use it, or replace it with a better one.
+- Use your 'write_file' tool to create a new txt file with the following arguments:
+- for a filename, use the movie title
+- Write to the 'movie_pitches' directory.
+- For the 'content' to write, include:
+- The PLOT_OUTLINE
+- The BOX_OFFICE_REPORT
+- The CASTING_REPORT
+
+PLOT_OUTLINE:
+{ PLOT_OUTLINE? }
+
+BOX_OFFICE_REPORT:
+{ box_office_report? }
+
+CASTING_REPORT:
+{ casting_report? }
+""",
+```
+
+---
+
+## 13. Custom Workflow Agents
+
+When the pre-defined workflow agents of `SequentialAgent`, `LoopAgent`, and `ParallelAgent` are insufficient for your needs, `CustomAgent` provides the flexibility to implement new workflow logic.
+
+---
+
 ## Cleanup
+
+**Remove all resources used in the ADK project from GCP:**
+
+```bash
+gcloud services disable \
+    aiplatform.googleapis.com \
+    geminicloudassist.googleapis.com \
+    cloudaicompanion.googleapis.com \
+    cloudasset.googleapis.com \
+    recommender.googleapis.com \
+    appoptimize.googleapis.com \
+    --force
+```
+
 
 ### Remove Local Files Only
 ```bash
