@@ -25,9 +25,9 @@ __pycache__/
 *.csv
 *.zip
 *.gz
-*.jpg
-*.jpeg
-*.png
+# *.jpg
+# *.jpeg
+# *.png
 *.h5
 *.tflite
 
