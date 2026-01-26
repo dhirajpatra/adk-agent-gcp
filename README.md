@@ -3,8 +3,8 @@
 ## Overview
 This tutorial guides you through creating AI agents using Google Cloud's ADK (Agent Development Kit) with various tools and capabilities including currency exchange, web search, and Wikipedia integration.
 
-![ucp_adk_ecommerce_recommendation_system](images/ucp_adk_ecommerce_recommendation_system_1.png)  
-![ucp_adk_ecommerce_recommendation_system](images/ucp_adk_ecommerce_recommendation_system_2.png)
+![ucp_adk_ecommerce_recommendation_system](./images/ucp_adk_ecommerce_recommendation_system_1.png)  
+![ucp_adk_ecommerce_recommendation_system](./images/ucp_adk_ecommerce_recommendation_system_2.png)
 
 
 ## Prerequisites
