@@ -27,7 +27,7 @@ __pycache__/
 *.gz
 *.jpg
 *.jpeg
-*.png
+# *.png
 *.h5
 *.tflite
 
