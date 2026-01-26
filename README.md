@@ -3,6 +3,10 @@
 ## Overview
 This tutorial guides you through creating AI agents using Google Cloud's ADK (Agent Development Kit) with various tools and capabilities including currency exchange, web search, and Wikipedia integration.
 
+![ucp_adk_ecommerce_recommendation_system](images/ucp_adk_ecommerce_recommendation_system_1.png)  
+![ucp_adk_ecommerce_recommendation_system](images/ucp_adk_ecommerce_recommendation_system_2.png)
+
+
 ## Prerequisites
 - Google Cloud account with billing enabled
 - Access to Google Cloud Shell
@@ -750,6 +754,58 @@ gcloud services disable aiplatform.googleapis.com
 Visit: https://cloud.google.com/resource-manager/docs/creating-managing-projects#shut_down_a_project
 
 ## Next Steps
+
+## 🔌 Integration Example
+
+# Get recommendations
+response = root_agent.chat(
+    "Get recommendations for user user_123 who viewed laptop and mouse"
+)
+print(response)
+```
+
+## 📊 Production Deployment
+
+### Option 1: Cloud Run
+```bash
+# Deploy as REST API
+gcloud run deploy recommendation-agent \
+  --source . \
+  --region us-central1
+```
+
+### Option 2: Cloud Functions
+```bash
+# Deploy as serverless function
+gcloud functions deploy recommend \
+  --runtime python312 \
+  --trigger-http
+```
+
+## 🔐 Environment Variables
+
+```bash
+# Optional
+LOG_LEVEL=INFO
+CACHE_TTL=3600
+```
+
+## 🧪 Testing
+
+```bash
+# Run tests
+pytest tests/
+
+# Test individual components
+python -m recommendation_system.tools
+python -m recommendation_system.functions
+```
+
+## 📚 Further Reading
+
+- [ADK Documentation](https://cloud.google.com/adk)
+- [Vertex AI](https://cloud.google.com/vertex-ai)
+- [UCP Protocol](https://developers.googleblog.com/under-the-hood-universal-commerce-protocol-ucp)
 
 ### 13. Build Advanced Multi-Agent Systems
 - **Travel Planning Agent**: Transfer conversations between specialized agents
