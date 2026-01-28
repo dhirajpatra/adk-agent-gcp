@@ -5,6 +5,8 @@ This tutorial guides you through creating AI agents using Google Cloud's ADK (Ag
 
 ![ucp_adk_ecommerce_recommendation_system](./images/ucp_adk_ecommerce_recommendation_system_1.png)  
 ![ucp_adk_ecommerce_recommendation_system](./images/ucp_adk_ecommerce_recommendation_system_2.png)
+![ucp_adk_wp_connector](./images/ucp_adk_wp_connector.png)
+
 
 
 ## Prerequisites
