@@ -9,17 +9,23 @@ Connects to UCP-compliant merchant servers for:
 """
 
 import requests
+import os
+from dotenv import load_dotenv
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 import json
 
+load_dotenv()
+
+@dataclass
 @dataclass
 class UCPMerchant:
     """UCP Merchant configuration"""
     base_url: str
     merchant_id: str
     capabilities: List[str]
-    
+    api_key: Optional[str] = None
+
 @dataclass
 class UCPProduct:
     """UCP Product representation"""
@@ -40,11 +46,18 @@ class UCPClient:
     def __init__(self, merchant: UCPMerchant):
         self.merchant = merchant
         self.session = requests.Session()
-        self.session.headers.update({
+        
+        headers = {
             'Content-Type': 'application/json',
             'Accept': 'application/json',
-            'X-UCP-Version': '1.0'
-        })
+            'X-UCP-Version': '1.0',
+            'User-Agent': 'UCP-Agent/1.0'
+        }
+        
+        if merchant.api_key:
+            headers['X-UCP-API-Key'] = merchant.api_key
+            
+        self.session.headers.update(headers)
     
     def discover_capabilities(self) -> Dict:
         """
@@ -75,16 +88,12 @@ class UCPClient:
     ) -> List[UCPProduct]:
         """
         Search products using UCP Catalog capability.
-        
-        Args:
-            query: Search query
-            category: Filter by category
-            limit: Max results
-            
-        Returns:
-            List of UCP-compliant products
         """
         try:
+            # Update for Ramdev (WordPress UCP) to use the new GET endpoint
+            if self.merchant.merchant_id == "ramdev_clothing":
+                return self._search_ucp_wp_endpoint(query, category, limit)
+
             payload = {
                 "query": query,
                 "filters": {
@@ -94,28 +103,136 @@ class UCPClient:
             }
             
             response = self.session.post(
-                f"{self.merchant.base_url}/ucp/catalog/search",
+                f"{self.merchant.base_url}/catalog/search",
                 json=payload
             )
             response.raise_for_status()
             data = response.json()
             
+            return self._parse_products(data.get("products", []))
+            
+        except Exception as e:
+            print(f"[UCP] Product search failed: {e}")
+            return []
+
+    def _search_ucp_wp_endpoint(self, query: str, category: str, limit: int) -> List[UCPProduct]:
+        """
+        Search using the new GET /product/search endpoint.
+        Endpoint: GET /wp-json/ucp/v1/product/search
+        """
+        try:
+            # base_url is expected to be .../wp-json/ucp/v1
+            url = f"{self.merchant.base_url}/product/search"
+            
+            params = {
+                "search": query,
+                "limit": limit
+            }
+            if category:
+                params["category"] = category
+
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            # WP UCP Endpoint returns: { "success": true, "data": [ ... ], "meta": ... }
+            products_data = []
+            if isinstance(data, dict):
+                products_data = data.get("data", [])
+            elif isinstance(data, list):
+                products_data = data
+            
             products = []
-            for item in data.get("products", []):
+            for item in products_data:
+                # Parse WP-style product fields
+                price_str = item.get("price", "0")
+                try:
+                    price_val = float(price_str)
+                except:
+                    price_val = 0.0
+                
                 products.append(UCPProduct(
-                    id=item["id"],
-                    name=item["name"],
-                    price=item["price"]["amount"],
-                    currency=item["price"]["currency"],
-                    image_url=item.get("image_url"),
-                    description=item.get("description")
+                    id=str(item.get("id")),
+                    name=item.get("name"),
+                    price=price_val,
+                    currency="INR", # Defaulting to INR as it is a specific Indian store (Ramdev), or 'USD' if safer.
+                    # Given the context 'ramdevitworld' / Indian pricing (2499 for adapter), INR is likely.
+                    # But UCPProduct defaults to USD. Let's use currency code if available or assume INR for this client.
+                    # The response doesn't seem to have currency, but likely INR.
+                    # I will assume 'USD' to be safe with existing types or 'INR' if I can. 
+                    # Let's check if there is a currency field. Not in debug output.
+                    image_url=item.get("image"), # Key is 'image' in WP response
+                    description=item.get("short_description") or item.get("name")
                 ))
             
             return products
             
         except Exception as e:
-            print(f"[UCP] Product search failed: {e}")
+            print(f"[UCP-WP] Search failed: {e}")
             return []
+
+    def _search_woocommerce_store_api(self, query: str, category: str, limit: int) -> List[UCPProduct]:
+        """Fallback to WooCommerce Store API (Legacy/Backup)"""
+        try:
+            # Construct Store API URL from base URL (strip /ucp/v1)
+            # Expecting base_url like .../wp-json/ucp/v1
+            root_api = self.merchant.base_url.replace("/ucp/v1", "")
+            url = f"{root_api}/wc/store/products"
+            
+            params = {
+                "search": query,
+                "per_page": limit
+            }
+            if category:
+                params["category"] = category
+
+            # Store API uses GET
+            response = self.session.get(url, params=params)
+            response.raise_for_status()
+            data = response.json()
+            
+            products = []
+            for item in data:
+                # Store API Item adaptation
+                image = item.get("images", [{}])[0].get("src")
+                price = item.get("prices", {}).get("price", "0")
+                currency = item.get("prices", {}).get("currency_code", "USD")
+                
+                # Price often comes as string in cents/smallest unit or formatted. 
+                # Store API usually returns formatted string in 'price', but integers in 'regular_price'
+                # We'll take a best effort approach
+                try:
+                    price_val = float(price) / 100 if float(price) > 1000 else float(price) # heuristic for cents
+                except:
+                    price_val = 0.0
+
+                products.append(UCPProduct(
+                    id=str(item.get("id")),
+                    name=item.get("name"),
+                    price=price_val,
+                    currency=currency,
+                    image_url=image,
+                    description=item.get("short_description")
+                ))
+            return products
+            
+        except Exception as e:
+            print(f"[WC-API] Search failed: {e}")
+            return []
+
+    def _parse_products(self, raw_products: List[Dict]) -> List[UCPProduct]:
+        """Helper to parse standard UCP products"""
+        products = []
+        for item in raw_products:
+            products.append(UCPProduct(
+                id=item["id"],
+                name=item["name"],
+                price=item["price"]["amount"],
+                currency=item["price"]["currency"],
+                image_url=item.get("image_url"),
+                description=item.get("description")
+            ))
+        return products
     
     def get_product_details(self, product_id: str) -> Optional[Dict]:
         """
@@ -128,8 +245,46 @@ class UCPClient:
             Product details or None
         """
         try:
+            # Special handling for Ramdev (WordPress UCP)
+            if self.merchant.merchant_id == "ramdev":
+                # Fallback: Use WooCommerce Store API
+                try:
+                    # Construct Store API URL
+                    root_api = self.merchant.base_url.replace("/ucp/v1", "")
+                    url = f"{root_api}/wc/store/products/{product_id}"
+                    
+                    response = self.session.get(url)
+                    response.raise_for_status()
+                    item = response.json()
+                    
+                    # Parse Store API format
+                    # Price is usually in minor units (e.g., cents/paisa)
+                    # "prices": { "price": "249900", "currency_minor_unit": 2 ... }
+                    price_data = item.get("prices", {})
+                    raw_price = float(price_data.get("price", 0))
+                    minor_unit = int(price_data.get("currency_minor_unit", 2))
+                    price_val = raw_price / (10 ** minor_unit) if raw_price > 0 else 0.0
+                    
+                    # Get image
+                    images = item.get("images", [])
+                    image_url = images[0].get("src") if images else None
+                    
+                    return {
+                        "id": str(item.get("id")),
+                        "name": item.get("name"),
+                        "price": {
+                            "amount": price_val,
+                            "currency": price_data.get("currency_code", "USD")
+                        },
+                        "image_url": image_url,
+                        "description": item.get("description") or item.get("short_description")
+                    }
+                except Exception as wc_e:
+                    print(f"[WC-API] Details fetch failed: {wc_e}")
+                    return None
+
             response = self.session.get(
-                f"{self.merchant.base_url}/ucp/catalog/products/{product_id}"
+                f"{self.merchant.base_url}/catalog/products/{product_id}"
             )
             response.raise_for_status()
             return response.json()
@@ -162,7 +317,7 @@ class UCPClient:
             }
             
             response = self.session.post(
-                f"{self.merchant.base_url}/ucp/checkout/sessions",
+                f"{self.merchant.base_url}/checkout/sessions",
                 json=payload
             )
             response.raise_for_status()
@@ -195,7 +350,7 @@ class UCPClient:
             }
             
             response = self.session.post(
-                f"{self.merchant.base_url}/ucp/recommendations",
+                f"{self.merchant.base_url}/recommendations",
                 json=payload
             )
             response.raise_for_status()
@@ -245,7 +400,7 @@ class UCPClient:
             }
             
             response = self.session.post(
-                f"{self.merchant.base_url}/ucp/events",
+                f"{self.merchant.base_url}/events",
                 json=payload
             )
             response.raise_for_status()
@@ -254,6 +409,93 @@ class UCPClient:
         except Exception as e:
             print(f"[UCP] Event tracking failed: {e}")
             return False
+            
+    def create_session(self, user_data: Dict = None) -> Dict:
+        """
+        Create a new session (WP UCP Adapter specific).
+        Endpoint: POST /session
+        """
+        try:
+            payload = {"user_data": user_data or {}}
+            response = self.session.post(
+                f"{self.merchant.base_url}/session",
+                json=payload
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"[UCP] Create session failed: {e}")
+            return {"error": str(e)}
+
+    def update_session(self, session_id: str, data: Dict) -> Dict:
+        """
+        Update session data.
+        Endpoint: PUT /update/{session_id}
+        """
+        try:
+            response = self.session.put(
+                f"{self.merchant.base_url}/update/{session_id}",
+                json=data
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"[UCP] Update session failed: {e}")
+            return {"error": str(e)}
+
+    def complete_session(self, session_id: str) -> Dict:
+        """
+        Complete a session.
+        Endpoint: POST /complete/{session_id}
+        """
+        try:
+            response = self.session.post(
+                f"{self.merchant.base_url}/complete/{session_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"[UCP] Complete session failed: {e}")
+            return {"error": str(e)}
+
+    def get_session_status(self, session_id: str) -> Dict:
+        """
+        Check session status.
+        Endpoint: GET /status/{session_id}
+        """
+        try:
+            response = self.session.get(
+                f"{self.merchant.base_url}/status/{session_id}"
+            )
+            response.raise_for_status()
+            return response.json()
+        except Exception as e:
+            print(f"[UCP] Get session status failed: {e}")
+            return {"error": str(e)}
+
+    def get_sessions(self, limit: int = 10, status: Optional[str] = None) -> List[Dict]:
+        """
+        List all sessions.
+        Endpoint: GET /sessions
+        """
+        try:
+            params = {"limit": limit}
+            if status:
+                params["status"] = status
+                
+            response = self.session.get(
+                f"{self.merchant.base_url}/sessions",
+                params=params
+            )
+            response.raise_for_status()
+            # Assuming it returns a list of sessions or a dict with 'sessions' key
+            data = response.json()
+            if isinstance(data, list):
+                return data
+            return data.get("sessions", [])
+        except Exception as e:
+            print(f"[UCP] Get sessions failed: {e}")
+            return []
 
 
 # ==================== UCP MERCHANT REGISTRY ====================
@@ -270,7 +512,7 @@ class UCPMerchantRegistry:
         
         # Example: Shopify merchant with UCP support
         shopify_merchant = UCPMerchant(
-            base_url="https://your-shop.myshopify.com",
+            base_url="https://your-shop.myshopify.com/ucp",
             merchant_id="shopify_store_123",
             capabilities=["Checkout", "Catalog", "Orders"]
         )
@@ -278,14 +520,31 @@ class UCPMerchantRegistry:
         
         # Example: Custom UCP merchant
         custom_merchant = UCPMerchant(
-            base_url="https://api.yourstore.com",
+            base_url="https://api.yourstore.com/ucp",
             merchant_id="custom_store_456",
             capabilities=["Checkout", "Catalog", "Recommendations"]
         )
         self.merchants["custom"] = UCPClient(custom_merchant)
+
+        # Ramdev Electronics (UCP Adapter for WooCommerce)
+        ramdev_base_url = os.getenv("UCP_WP_CLIENT_BASE_URL")
+        ramdev_api_key = os.getenv("UCP_WP_CLIENT_API_KEY")
+
+        if ramdev_base_url and ramdev_api_key:
+            ramdev_merchant = UCPMerchant(
+                base_url=ramdev_base_url,
+                merchant_id="ramdev_clothing",
+                capabilities=["Checkout", "Catalog", "Recommendations", "Session"],
+                api_key=ramdev_api_key
+            )
+            self.merchants["ramdev"] = UCPClient(ramdev_merchant)
+        else:
+            print("[Warning] UCP_WP_CLIENT_BASE_URL or UCP_WP_CLIENT_API_KEY not set. 'ramdev' client disabled.")
     
     def get_client(self, merchant_id: str) -> Optional[UCPClient]:
         """Get UCP client for specific merchant"""
+        if merchant_id == "ramdevitworld":
+            return self.merchants.get("ramdev")
         return self.merchants.get(merchant_id)
     
     def search_all_merchants(

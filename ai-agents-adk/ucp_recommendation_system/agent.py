@@ -4,7 +4,7 @@ File: recommendation_system/agent.py
 
 Now connects to real UCP merchant servers!
 """
-
+import os
 from google.adk.agents import Agent
 from google.adk.tools import FunctionTool
 from .ucp_tools import (
@@ -17,9 +17,13 @@ from .ucp_tools import (
 
 # ==================== UCP-ENABLED AGENTS ====================
 
+UCP_WP_CLIENT_BASE_URL = os.getenv("UCP_WP_CLIENT_BASE_URL")
+UCP_WP_CLIENT_API_KEY = os.getenv("UCP_WP_CLIENT_API_KEY")
+model = os.getenv("MODEL")
+
 # Product Discovery Agent
 discovery_agent = Agent(
-    model='gemini-2.5-flash',
+    model=model,
     name='discovery_agent',
     description='Discovers products from UCP-compliant merchants',
     instruction="""
@@ -37,7 +41,7 @@ discovery_agent = Agent(
 
 # Recommendation Agent (UCP-powered)
 recommendation_agent = Agent(
-    model='gemini-2.5-flash',
+    model=model,
     name='recommendation_agent',
     description='Provides UCP-powered personalized recommendations',
     instruction="""
@@ -57,7 +61,7 @@ recommendation_agent = Agent(
 
 # Checkout Agent
 checkout_agent = Agent(
-    model='gemini-2.5-flash',
+    model=model,
     name='checkout_agent',
     description='Creates UCP checkout sessions for purchases',
     instruction="""
@@ -74,7 +78,7 @@ checkout_agent = Agent(
 
 # Root Orchestrator Agent
 root_agent = Agent(
-    model='gemini-2.5-flash',
+    model=model,
     name='ucp_shopping_assistant',
     description='UCP-powered shopping assistant',
     instruction="""
@@ -129,6 +133,7 @@ UCP Merchant Configuration:
    - Shopify (with UCP support)
    - Google AI Mode in Search
    - Gemini app
+   - WordPress with WooCommerce Store API and UCP Adapter plugin from dhirajpatra
    - Any UCP-compliant merchant
 
 Run with: adk web

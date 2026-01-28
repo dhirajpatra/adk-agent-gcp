@@ -3,3 +3,8 @@ GOOGLE_CLOUD_PROJECT=project-id
 GOOGLE_CLOUD_LOCATION=us-central1
 GOOGLE_AI_STUDIO_API_KEY=your_key
 GEMINI_MODEL="gemini-2.5-flash-lite"
+
+UCP_WP_CLIENT_BASE_URL="https://xyz.com"
+UCP_WP_CLIENT_API_KEY="4f44fr44t446grrsgdf75gt5"
+
+SYS_PATH="/home/xyz/Desktop/python/adk-agent-gcp/ai-agents-adk/ucp_recommendation_system"

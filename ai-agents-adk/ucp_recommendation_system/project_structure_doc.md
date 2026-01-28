@@ -50,6 +50,9 @@ custom_merchant = UCPMerchant(
     merchant_id="my_store",
     capabilities=["Checkout", "Catalog", "Recommendations"]
 )
+
+Implemented WordPress UCP Client integration. support API Key authentication.
+
 ```
 
 ### 3. Run the Agent
@@ -171,6 +174,7 @@ python mock_ucp_server.py
 - [UCP Documentation](https://ucp.dev)
 - [Google UCP Guide](https://developers.google.com/merchant/ucp)
 - [Shopify UCP Integration](https://shopify.engineering/ucp)
+- [WordPress UCP Client](https://wordpress.org/plugins/ucp-adapter-for-woocommerce/)
 
 ## 🐛 Troubleshooting
 
